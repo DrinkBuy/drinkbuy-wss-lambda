@@ -1,0 +1,6 @@
+execute local:
+    docker run -p 8000:8000 amazon/dynamodb-local
+    ./env.sh
+
+test with:
+    curl -sS -X POST "http://localhost:4000/publish" -H 'content-type: application/json' -d '{"user_id":"66f0a0f0a0f0a0f0a0f0a0f0","username":"alice","scope":"user","command":"PING"}' | jq
