@@ -15,11 +15,11 @@ provider:
       - subnet-0a9478b6b5f6c3fd4
   environment:
     DDB_LOCAL_ENDPOINT:
-    MONGODB_URI: ${env:MONGODB_URI, "mongodb+srv://drinkbuy.pxmj6.mongodb.net/drinkbuy-development"}
+    MONGODB_URI: ${env:MONGODB_URI, "mongodb+srv://drinkbuy.pxmj6.mongodb.net/drinkbuy-production"}
     MONGODB_USER: ${env:MONGODB_USER, "drink-buy-api"}
     MONGODB_PASS: ${env:MONGODB_PASS, "82JN8XC2sZ6tui7R"}
     CONNECTIONS_TABLE: websocket-lambda-connections-${sls:stage}
-    JWT_SECRET: ${env:JWT_SECRET, "54E2F7D7373B2B46BC536186338E2"}
+    JWT_SECRET: ${env:JWT_SECRET, "2cf198386d100b1395c411fc97e67624"}
     SOCKET_CORS_ORIGIN: ${env:SOCKET_CORS_ORIGIN, "http://localhost:4000,http://localhost:5173,http://localhost:3000,https://r9rw7gwe6g.us-east-1.awsapprunner.com,https://pnfe47jzdw.us-east-1.awsapprunner.com"}
     API_GW_WS_ENDPOINT: ${env:API_GW_WS_ENDPOINT, "https://29jonpi3wg.execute-api.us-east-1.amazonaws.com/publish-command"}
     WEBSOCKET_API_ENDPOINT: ${env:WEBSOCKET_API_ENDPOINT, "wss://cdgfr685w1.execute-api.us-east-1.amazonaws.com/${sls:stage}"}
