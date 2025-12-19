@@ -44,7 +44,7 @@ export function isBarOpenNow(now: Date, timezone: string, openHours: OpenHour[])
     const nowLocal = DateTime.fromJSDate(now, { zone: "utc" }).setZone(tz);
 
     // Debug
-    console.log("[BarService].isBarOpenNow(): now", { now: now.toISOString(), tz, nowLocal: nowLocal.toISO() });
+    // console.log("[BarService].isBarOpenNow(): now", { now: now.toISOString(), tz, nowLocal: nowLocal.toISO() });
 
     const candidates = [nowLocal, nowLocal.minus({ days: 1 })];
 
@@ -70,12 +70,12 @@ export function isBarOpenNow(now: Date, timezone: string, openHours: OpenHour[])
             if (closeLocal <= openLocal) closeLocal = closeLocal.plus({ days: 1 });
 
             // Debug
-            console.log("[BarService].isBarOpenNow(): window", {
-                day: h.day,
-                type: h.type,
-                openLocal: openLocal.toISO(),
-                closeLocal: closeLocal.toISO()
-            });
+            // console.log("[BarService].isBarOpenNow(): window", {
+            //    day: h.day,
+            //    type: h.type,
+            //    openLocal: openLocal.toISO(),
+            //    closeLocal: closeLocal.toISO()
+            // });
 
             if (nowLocal >= openLocal && nowLocal < closeLocal) return true;
         }
