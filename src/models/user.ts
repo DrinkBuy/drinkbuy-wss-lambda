@@ -1,11 +1,14 @@
 import mongoose, { Schema } from 'mongoose';
 
-export interface IUserModel extends mongoose.Document {
+export interface IUser {
+    _id?: mongoose.Types.ObjectId;
+    bar_id?: mongoose.Types.ObjectId;
     username: string;
     role: string;
 }
 
-const userSchema = new Schema<IUserModel>({
+const userSchema = new Schema<IUser>({
+    bar_id: { type: mongoose.Schema.Types.ObjectId, ref: "Bar", required: false, default: null },
     username: {
         type: String,
         required: true,
@@ -17,4 +20,4 @@ const userSchema = new Schema<IUserModel>({
     },
 }, { strict: false }); // keep flexible to match existing schema
 
-export const UserModel = mongoose.models.User || mongoose.model<IUserModel>('User', userSchema);
+export const UserModel = mongoose.models.User || mongoose.model<IUser>('User', userSchema);

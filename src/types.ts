@@ -1,3 +1,5 @@
+// noinspection SpellCheckingInspection
+
 export type JwtPayload = { _id: string; username: string };
 
 export enum TypeUserCommandScopeEnum {
@@ -7,7 +9,14 @@ export enum TypeUserCommandScopeEnum {
 }
 
 export enum TypeUserCommandEnum {
-    // add your command types here
+    ALL = "ALL",
+    RELOAD = "RELOAD",
+    LOGOUT = "LOGOUT",
+    AUDIO_RED_SCREEN_RESET_COMMAND = "AUDIO_RED_SCREEN_RESET_COMMAND",
+    ACTIVE_ORDER_RESET_COMMAND = "ACTIVE_ORDER_RESET_COMMAND",
+    TOKEN_STORAGE_RESET_COMMAND = "TOKEN_STORAGE_RESET_COMMAND",
+    ACTIVE_ORDER_REFRESH = "ACTIVE_ORDER_REFRESH",
+    BAR_OPEN_CLOSED = "BAR_OPEN_CLOSED",
 }
 
 export enum PostToConnectionStatus {
@@ -53,3 +62,27 @@ export type UserCommandOut = {
     executed: boolean;
     created_at?: Date;
 };
+
+export enum TypeServiceModeEnum {
+    PICKUP = "pickup",
+    TABLE_SERVICE_ON = "tableservice_on",
+    TABLE_SERVICE_OFF = "tableservice_off",
+    BOTH_ON = "both_on",
+    BOTH_OFF = "both_off",
+}
+
+export enum TypeDayEnum {
+    MONDAY = "monday",
+    TUESDAY = "tuesday",
+    WEDNESDAY = "wednesday",
+    THURSDAY = "thursday",
+    FRIDAY = "friday",
+    SATURDAY = "saturday",
+    SUNDAY = "sunday",
+}
+
+export enum TypeDayTypeEnum {
+    REGULAR = "regular",
+    HOLIDAY = "holiday",
+    EVENT = "event",
+}
