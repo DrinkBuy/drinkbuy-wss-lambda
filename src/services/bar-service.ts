@@ -4,7 +4,7 @@ import { DateTime } from "luxon";
 import {publishCommandAndFanOut} from "./publisher-service";
 import {IUser, UserModel} from "../models/user";
 import {UserCommandModel} from "../models/user-command";
-import {TypeUserCommandEnum, TypeUserCommandScopeEnum} from "../types";
+import {TypeUserCommandEnum, TypeUserCommandScopeEnum, TypeUserStatusEnum} from "../types";
 import BarModel, {IBar, IOpenHourBar} from "../models/bar";
 
 type OpenHour = IOpenHourBar;
@@ -39,22 +39,27 @@ function parseHHMM(hourMinute: string): { hour: number; minute: number } {
  * - Overnight: if close <= open, close is on the next day
  * - Checks today and yesterday (to cover "closes at 02:00" after midnight)
  */
-export function isBarOpenNow(nowUtc: Date, timezone: string, openHours: OpenHour[]): boolean {
-    const tz = timezone || "UTC";
-    const nowLocal = DateTime.fromJSDate(nowUtc, { zone: "utc" }).setZone(tz);
+export function isBarOpenNow(now: Date, timezone: string, openHours: OpenHour[]): boolean {
+    const tz = timezone || "Europe/Copenhagen";
+    const nowLocal = DateTime.fromJSDate(now, { zone: "utc" }).setZone(tz);
+
+    // Debug
+    console.log("[BarService].isBarOpenNow(): now", { now: now.toISOString(), tz, nowLocal: nowLocal.toISO() });
 
     const candidates = [nowLocal, nowLocal.minus({ days: 1 })];
 
     for (const baseDay of candidates) {
-        // 1..7
-        const weekday = baseDay.weekday;
-        const todays = openHours.filter(
-            (h) => h?.type === "regular" && dayToWeekday(h.day) === weekday
-        );
+        const weekday = baseDay.weekday; // 1..7
+
+        const todays = openHours.filter((h) => {
+            const type = String(h?.type || "").toLowerCase();
+            const day = String(h?.day || "").toLowerCase();
+            return type === "regular" && dayToWeekday(day) === weekday;
+        });
 
         for (const h of todays) {
-            if (h.open === "00:00" && h.close === "00:00")
-                continue;
+            if (!h?.open || !h?.close) continue;
+            if (h.open === h.close) continue;
 
             const o = parseHHMM(h.open);
             const c = parseHHMM(h.close);
@@ -62,25 +67,32 @@ export function isBarOpenNow(nowUtc: Date, timezone: string, openHours: OpenHour
             const openLocal = baseDay.set({ hour: o.hour, minute: o.minute, second: 0, millisecond: 0 });
             let closeLocal = baseDay.set({ hour: c.hour, minute: c.minute, second: 0, millisecond: 0 });
 
-            if (closeLocal <= openLocal)
-                closeLocal = closeLocal.plus({ days: 1 });
+            if (closeLocal <= openLocal) closeLocal = closeLocal.plus({ days: 1 });
 
-            if (nowLocal >= openLocal && nowLocal < closeLocal)
-                return true;
+            // Debug
+            console.log("[BarService].isBarOpenNow(): window", {
+                day: h.day,
+                type: h.type,
+                openLocal: openLocal.toISO(),
+                closeLocal: closeLocal.toISO()
+            });
+
+            if (nowLocal >= openLocal && nowLocal < closeLocal) return true;
         }
     }
 
     return false;
 }
 
-async function getUsersToNotify(barId: any): Promise<IUser[]> {
-    return UserModel.find({bar_id: barId, active: true});
+
+async function getUsersToNotify(barId: string): Promise<IUser[]> {
+    return UserModel.find({bar_id: barId, status: TypeUserStatusEnum.ACTIVE});
 }
 
 export async function runBarOpenCloseTick(): Promise<{ ok: true; changed: number; scanned: number }> {
-    const nowUtc = new Date();
+    const now = new Date();
 
-    console.log("[BarService].runBarOpenCloseTick(): ISO date", nowUtc.toISOString());
+    console.log("[BarService].runBarOpenCloseTick(): ISO date", now.toISOString());
 
     const cursor = BarModel.find(
         { "status.active": true, hidden: false },
@@ -97,11 +109,16 @@ export async function runBarOpenCloseTick(): Promise<{ ok: true; changed: number
     let changed = 0;
 
     for await (const bar of cursor) {
+
+        console.log("[BarService].runBarOpenCloseTick(): checking bar", bar._id?.toString(), bar.name);
+
         scanned++;
         const timezone = bar.timezone || "Europe/Copenhagen";
         const openHours: OpenHour[] = Array.isArray(bar.open_hours) ? bar.open_hours : [];
-        const shouldBeOpen = isBarOpenNow(nowUtc, timezone, openHours);
+        const shouldBeOpen = isBarOpenNow(now, timezone, openHours);
         const currentOpen = !!bar.status?.open_for_orders;
+
+        console.log("[BarService].runBarOpenCloseTick(): bar should be open", shouldBeOpen);
 
         if (shouldBeOpen === currentOpen)
             continue;
@@ -111,22 +128,28 @@ export async function runBarOpenCloseTick(): Promise<{ ok: true; changed: number
             {
                 $set: {
                     "status.open_for_orders": shouldBeOpen,
-                    updated_at: nowUtc,
+                    updated_at: now,
                 },
             }
         );
+
+        console.log("[BarService].runBarOpenCloseTick(): modified count", res.modifiedCount);
 
         if (res.modifiedCount !== 1)
             continue;
 
         changed++;
 
-        const users = await getUsersToNotify(bar._id);
+        const users = await getUsersToNotify(String(bar._id));
         const batches = chunk(users, 15);
+
+        console.log("[BarService].runBarOpenCloseTick(): total users to publish command", users.length);
 
         for (const batch of batches) {
             await Promise.all(
                 batch.map(async (user: any) => {
+                    console.log("[BarService].runBarOpenCloseTick(): user", user._id?.toString(), user.username);
+
                     const created = await new UserCommandModel({
                         user_id: user._id,
                         username: user.username,

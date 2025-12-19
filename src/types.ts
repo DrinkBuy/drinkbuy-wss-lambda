@@ -2,6 +2,12 @@
 
 export type JwtPayload = { _id: string; username: string };
 
+export enum TypeUserStatusEnum {
+    ACTIVE = "active",
+    INACTIVE = "inactive",
+    BANNED = "banned",
+}
+
 export enum TypeUserCommandScopeEnum {
     TENANT = "tenant",
     USER = "user",

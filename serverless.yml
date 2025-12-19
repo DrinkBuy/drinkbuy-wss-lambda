@@ -60,15 +60,19 @@ functions:
       - websocket: { route: $disconnect }
       - websocket: { route: $default }
       - websocket: { route: "user-commands-ack" }
+
   barOpenClose:
+    name: drinkbuy-wss-lambda-commands-${sls:stage}-bar-open-close
     handler: src/handlers/bar-open-close.handler
+    timeout: 120
+    memorySize: 512
     events:
       - schedule:
-        rate: rate(1 minute)
-        enabled: true
-        input:
-          action: scheduled_open_closed_bars
-          job: bar_open_close
+          rate: rate(1 minute)
+          enabled: true
+          input:
+            action: scheduled_open_closed_bars
+            job: bar_open_close
 
   httpPublish:
     name: drinkbuy-wss-lambda-commands-${sls:stage}-http-publish
