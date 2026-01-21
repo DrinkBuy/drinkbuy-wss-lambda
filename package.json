@@ -16,6 +16,7 @@
     "@types/mongoose": "^5.11.97",
     "aws-sdk": "^2.1000.0",
     "jsonwebtoken": "^9.0.0",
+    "luxon": "^3.7.2",
     "mongoose": "^8.19.0",
     "tsyringe": "^4.8.0"
   },
@@ -23,6 +24,7 @@
     "@types/aws-lambda": "^8.10.130",
     "@types/jest": "^29.5.11",
     "@types/jsonwebtoken": "^9.0.5",
+    "@types/luxon": "^3.7.1",
     "@types/node": "^20.10.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
