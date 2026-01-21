@@ -43,6 +43,8 @@ export interface IBar {
         active: boolean;
         open_for_orders: boolean;
         table_service_on: boolean;
+        auto_open_window?: string;
+        auto_close_window?: string;
     };
     timezone: string;
     category: string;
@@ -98,6 +100,8 @@ const BarSchema = new Schema<IBar>({
         active: { type: Boolean, default: false },
         open_for_orders: { type: Boolean, default: false },
         table_service_on: { type: Boolean, default: true },
+        auto_open_window: { type: String, required: false },
+        auto_close_window: { type: String, required: false },
     },
     timezone: { type: String, required: false, default: "Europe/Copenhagen" },
     locale: { type: String, required: false, default: "en-GB" },
