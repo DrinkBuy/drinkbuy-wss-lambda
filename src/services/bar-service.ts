@@ -149,6 +149,7 @@ async function getUsersToNotify(barId: string): Promise<IUser[]> {
 
 export async function runBarOpenCloseTick(): Promise<{ ok: true; changed: number; scanned: number }> {
     const now = new Date();
+
     console.log("[BarService].runBarOpenCloseTick(): ISO date", now.toISOString());
 
     const cursor = BarModel.find(
@@ -161,6 +162,9 @@ export async function runBarOpenCloseTick(): Promise<{ ok: true; changed: number
             "status.open_for_orders": 1,
             "status.auto_open_window": 1,
             "status.auto_close_window": 1,
+            // Manual override
+            "status.manual_override": 1,
+            "status.manual_override_until": 1,
         }
     ).lean<IBar>().cursor();
 
@@ -175,53 +179,116 @@ export async function runBarOpenCloseTick(): Promise<{ ok: true; changed: number
         const timezone = bar.timezone || "Europe/Copenhagen";
         const openHours: OpenHour[] = Array.isArray(bar.open_hours) ? bar.open_hours : [];
 
-        const { shouldBeOpen, openWindowKey, closeWindowKey } =
-            getBarOpenStateWithWindowKey(now, timezone, openHours);
+        const {
+            shouldBeOpen,
+            openWindowKey,
+            closeWindowKey
+        } = getBarOpenStateWithWindowKey(now, timezone, openHours);
 
         const currentOpen = !!bar.status?.open_for_orders;
 
+        // Manual override guard manual wins
+        const manualOverride = !!bar.status?.manual_override;
+        const manualOverrideUntil = bar.status?.manual_override_until || null;
+
+        const manualOverrideActive =
+            manualOverride && (!manualOverrideUntil || manualOverrideUntil.getTime() > now.getTime());
+
+        if (manualOverrideActive) {
+            console.log(
+                "[BarService].runBarOpenCloseTick(): skipping due to manual override",
+                {
+                    barId: String(bar._id),
+                    name: bar.name,
+                    now: now.toISOString(),
+                    timezone,
+                    currentOpen,
+                    shouldBeOpen,
+                    manualOverride,
+                    manualOverrideUntil: manualOverrideUntil?.toISOString() ?? null,
+                    openWindowKey,
+                    closeWindowKey,
+                }
+            );
+            continue;
+        }
+
+        // If state already matches, do nothing
+        if (shouldBeOpen === currentOpen) {
+            console.log(
+                "[BarService].runBarOpenCloseTick(): noop (state already matches)",
+                {
+                    barId: String(bar._id),
+                    name: bar.name,
+                    now: now.toISOString(),
+                    timezone,
+                    currentOpen,
+                    shouldBeOpen,
+                    openWindowKey,
+                    closeWindowKey,
+                }
+            );
+            continue;
+        }
+
         console.log("[BarService].runBarOpenCloseTick(): bar should be open", shouldBeOpen);
 
-        // If they are the same, maintain current behavior (do nothing)
+        // New rule: "only once per window"
+        // If it should be open, and we have already processed this window, ignore (do not reopen if the bartender closed it afterward)
+        // If it should be closed, and we have already processed this period, ignore (do not re-close if the bartender opened it afterward)
         if (shouldBeOpen) {
-            if (!openWindowKey)
-                continue;
+            if (!openWindowKey) continue;
 
             const storedOpenWindow = bar.status?.auto_open_window;
-
             const alreadyProcessedThisOpenWindow = storedOpenWindow === openWindowKey;
 
             if (alreadyProcessedThisOpenWindow) {
-                console.log("[BarService].runBarOpenCloseTick(): open window already processed, ignoring", {
-                    barId: String(bar._id),
-                    openWindowKey,
-                    storedOpenWindow
-                });
-
+                console.log(
+                    "[BarService].runBarOpenCloseTick(): OPEN ignored (already processed window)",
+                    {
+                        barId: String(bar._id),
+                        name: bar.name,
+                        now: now.toISOString(),
+                        storedOpenWindow,
+                        openWindowKey,
+                    }
+                );
                 continue;
             }
         } else {
-            if (!closeWindowKey)
-                continue;
+            if (!closeWindowKey) continue;
 
-            const alreadyProcessedThisCloseWindow = bar.status?.auto_close_window === closeWindowKey;
+            const storedCloseWindow = bar.status?.auto_close_window;
+            const alreadyProcessedThisCloseWindow = storedCloseWindow === closeWindowKey;
 
             if (alreadyProcessedThisCloseWindow) {
-                console.log("[BarService].runBarOpenCloseTick(): close window already processed, ignoring", {
-                    barId: String(bar._id),
-                    closeWindowKey
-                });
+                console.log(
+                    "[BarService].runBarOpenCloseTick(): CLOSE ignored (already processed window)",
+                    {
+                        barId: String(bar._id),
+                        name: bar.name,
+                        now: now.toISOString(),
+                        storedCloseWindow,
+                        closeWindowKey,
+                    }
+                );
                 continue;
             }
         }
 
-
         // Atomic update with "guard rails":
-        // - ensures that it is still in the expected current state (optimistic lock)
-        // - ensures that the window key has not already been marked (cross-run idempotency)
+        // ensures that it is still in the expected current state (optimistic lock)
+        // ensures that the window key has not already been marked (cross-run idempotency)
         const filter: any = {
             _id: bar._id,
             "status.open_for_orders": currentOpen,
+            // Optional: do not auto-change if a manual override gets set between read and write
+            $or: [
+                { "status.manual_override": { $ne: true } },
+                { "status.manual_override_until": { $lte: now } },
+                { "status.manual_override_until": null },
+                { "status.manual_override_until": { $exists: false } },
+            ],
         };
 
         const set: any = {
@@ -230,14 +297,13 @@ export async function runBarOpenCloseTick(): Promise<{ ok: true; changed: number
         };
 
         if (shouldBeOpen) {
-            // Prevents reopening if it has already been processed with the new key (end) OR with the old key (beginning)
             const denyKeys = [openWindowKey].filter(Boolean);
 
-            filter["status.auto_open_window"] = denyKeys.length > 0
-                ? { $nin: denyKeys }
-                : { $ne: openWindowKey };
+            filter["status.auto_open_window"] =
+                denyKeys.length > 0
+                    ? { $nin: denyKeys }
+                    : { $ne: openWindowKey };
 
-            // Always save the new key (end of the window), which is more stable.
             set["status.auto_open_window"] = openWindowKey;
         } else {
             filter["status.auto_close_window"] = { $ne: closeWindowKey };

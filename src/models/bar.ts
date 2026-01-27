@@ -45,6 +45,8 @@ export interface IBar {
         table_service_on: boolean;
         auto_open_window?: string;
         auto_close_window?: string;
+        manual_override?: boolean;
+        manual_override_until?: Date;
     };
     timezone: string;
     category: string;
@@ -102,6 +104,8 @@ const BarSchema = new Schema<IBar>({
         table_service_on: { type: Boolean, default: true },
         auto_open_window: { type: String, required: false },
         auto_close_window: { type: String, required: false },
+        manual_override: { type: Boolean, required: false, default: false },
+        manual_override_until: { type: Date, required: false, default: null },
     },
     timezone: { type: String, required: false, default: "Europe/Copenhagen" },
     locale: { type: String, required: false, default: "en-GB" },
