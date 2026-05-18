@@ -14,7 +14,7 @@ export async function publishToUser(userId: string, event: any) {
         env.WEBSOCKET_API_ENDPOINT?.replace("wss://", "https://")
     );
 
-    const connections = await DynamoConnectionRepository.listByUser(userId);
+    let connections = await DynamoConnectionRepository.listByUser(userId);
 
     console.log(`[PublishService].publishToUser(): found ${connections.length} connections for user ${userId}`);
 

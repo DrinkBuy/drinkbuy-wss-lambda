@@ -2,7 +2,7 @@ import mongoose, { Schema } from 'mongoose';
 import { TypeUserCommandScopeEnum } from '../types';
 
 export interface IUserCommandModel extends mongoose.Document {
-    user_id: mongoose.Types.ObjectId;
+    user_id: mongoose.Types.ObjectId | string;
     username: string;
     scope: TypeUserCommandScopeEnum;
     command: string;

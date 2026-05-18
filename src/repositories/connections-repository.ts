@@ -1,6 +1,7 @@
 import { PutCommand, DeleteCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../infra/ddb";
 import { env } from "../env";
+import {ScanCommand} from "@aws-sdk/client-dynamodb";
 
 const TTL_SECONDS = 60; // 5 * 60;
 
@@ -74,6 +75,14 @@ export const DynamoConnectionRepository = {
             ExpressionAttributeValues: { ":pk": `USER#${userId}` },
             ProjectionExpression: "connectionId",
             // ConsistentRead: true, // Consistent read
+        }));
+        return (out.Items || []).map((i: any) => i.connectionId as string);
+    },
+
+    async listAll(): Promise<string[]> {
+        const out = await docClient.send(new ScanCommand({
+            TableName: env.CONNECTIONS_TABLE,
+            ProjectionExpression: "connectionId",
         }));
         return (out.Items || []).map((i: any) => i.connectionId as string);
     },
