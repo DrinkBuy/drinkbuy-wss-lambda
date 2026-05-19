@@ -1,57 +1,110 @@
-import { APIGatewayProxyEventV2 } from "aws-lambda";
+import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { connectMongo } from "../db/mongo";
-import {publishCommandAndFanOut} from "../services/publisher-service";
-import {UserCommandModel} from "../models/user-command";
-import {checkTable, scanTable} from "../infra/ddb";
-import {env} from "../env";
+import { publishCommandAndFanOut } from "../services/publisher-service";
+import { IUserCommandModel, UserCommandModel } from "../models/user-command";
+import { checkTable, scanTable } from "../infra/ddb";
+import { env } from "../env";
+import { TypeUserCommandScopeEnum } from "../types";
 
-export const handler = async (event: APIGatewayProxyEventV2) => {
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+type PublishBody = {
+    user_id?: string;
+    username?: string;
+    scope?: TypeUserCommandScopeEnum;
+    command?: string;
+};
+
+const json = (statusCode: number, payload: unknown): APIGatewayProxyResultV2 => ({
+    statusCode,
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload),
+});
+
+function parseBody(raw: string | undefined): PublishBody {
+    if (!raw) return {};
     try {
-        const body = event.body ? JSON.parse(event.body) : {};
+        return JSON.parse(raw) as PublishBody;
+    } catch {
+        throw new Error("invalid JSON body");
+    }
+}
+
+async function createAndPublish(input: {
+    user_id: string;
+    username: string;
+    scope: TypeUserCommandScopeEnum;
+    command: string;
+}): Promise<IUserCommandModel> {
+    const created = await new UserCommandModel({ ...input, executed: false }).save();
+
+    await publishCommandAndFanOut({
+        _id: String(created._id),
+        user_id: String(created.user_id),
+        username: created.username,
+        scope: created.scope,
+        command: created.command,
+        executed: created.executed,
+        created_at: created.created_at,
+    });
+
+    return created;
+}
+
+export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
+    try {
+        let body: PublishBody;
+        try {
+            body = parseBody(event.body);
+        } catch (err) {
+            return json(400, { ok: false, error: (err as Error).message });
+        }
+
+        if (!body.scope || !body.command || !body.user_id) {
+            return json(400, { ok: false, error: "user_id, scope and command are required" });
+        }
 
         // For test and dev env
         await checkTable(env.CONNECTIONS_TABLE);
         await scanTable(env.CONNECTIONS_TABLE);
-
         await connectMongo();
 
-        // Persist the command (mirrors your UserService.createCommandExecute, but without roles/deps)
-        const created = await new UserCommandModel({
+        if (body.user_id === "ALL") {
+            const users = await UserCommandModel.find().exec();
+            await Promise.all(
+                users.map((user) =>
+                    createAndPublish({
+                        user_id: String(user.user_id),
+                        username: user.username,
+                        scope: body.scope!,
+                        command: body.command!,
+                    })
+                )
+            );
+
+            console.log(`[HttpPublish].handler() user command created for ${users.length} users`);
+
+            return json(201, { ok: true, id: "ALL", count: users.length });
+        }
+
+        if (!body.username) {
+            return json(400, { ok: false, error: "username is required" });
+        }
+
+        const created = await createAndPublish({
             user_id: body.user_id,
             username: body.username,
             scope: body.scope,
             command: body.command,
-            executed: false,
-        }).save();
+        });
 
         console.log("[HttpPublish].handler() user command created");
 
-        // Fan-out to all active connections for this user
-        await publishCommandAndFanOut({
-            _id: String(created._id),
-            user_id: String(created.user_id),
-            username: created.username,
-            scope: created.scope,
-            command: created.command,
-            executed: created.executed,
-            created_at: created.created_at,
-        });
-
-        return {
-            statusCode: 201,
-            body: JSON.stringify({
-                ok: true,
-                id: String(created._id)
-            })
-        };
-    } catch (err: any) {
+        return json(201, { ok: true, id: String(created._id) });
+    } catch (err) {
         console.error("[HttpPublish].handler() error", err);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({
-                ok: false,
-                error: err?.message || "error"
-            })
-        };
+
+        const message = err instanceof Error ? err.message : "error";
+        return json(500, { ok: false, error: message });
     }
 };
