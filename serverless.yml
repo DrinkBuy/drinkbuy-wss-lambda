@@ -1,4 +1,4 @@
-#file: noinspection SpellCheckingInspection
+#file: noinspection SpellCheckingInspection,YAMLSchemaValidation
 service: drinkbuy-wss-lambda-commands
 frameworkVersion: ">=3"
 
