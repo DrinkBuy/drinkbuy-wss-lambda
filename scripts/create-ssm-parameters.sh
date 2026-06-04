@@ -74,7 +74,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Empty so we can tell apart "user passed --file/--prefix" from
 # "fall back to the stage-derived default" once arg parsing is done.
-STAGE="dev"
+STAGE="prod"
 YAML_FILE=""
 ROOT_YAML=""
 PREFIX=""
