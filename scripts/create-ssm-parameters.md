@@ -8,11 +8,15 @@ syntax. Secrets stop living in git; the Lambda keeps running unchanged.
 ## TL;DR
 
 ```bash
-# Preview (read-only, no AWS writes, no file edits)
-./src/scripts/create-ssm-parameters.sh --dry-run --diff
+# Preview dev (read-only, no AWS writes, no file edits)
+./scripts/create-ssm-parameters.sh --dry-run --diff
 
-# Apply: create/update SSM params + rewrite serverless.yml provider.environment
-./src/scripts/create-ssm-parameters.sh
+# Apply dev: create/update SSM params + rewrite serverless.yml provider.environment
+./scripts/create-ssm-parameters.sh
+
+# Same flow for prod (derives scripts/serverless-prod.yml + /drinkbuy/wss-lambda/prod)
+./scripts/create-ssm-parameters.sh --stage prod --dry-run --diff
+./scripts/create-ssm-parameters.sh --stage prod
 
 # Deploy as usual — Serverless reads SSM at deploy time
 ./deploy-dev.sh
@@ -54,12 +58,18 @@ So:
 
 ## How it works
 
-There are two files with the same name and different roles:
+There is one source-of-truth file **per stage** and one committed deploy file:
 
 | File | Role | Git |
 | ---- | ---- | --- |
-| `src/scripts/serverless.yml` | **Source of truth** — holds the decrypted values under `provider.environment`. Read by this script. | **gitignored** (see `.gitignore`) |
-| `serverless.yml` (repo root) | **Deployed config** — its `provider.environment` is rewritten to `${ssm:...}` references. Read by Serverless at deploy. | committed |
+| `scripts/serverless-dev.yml`  | **Source of truth (dev)**  — holds the decrypted dev values under `provider.environment`. Read by this script when `--stage dev` (default). | **gitignored** |
+| `scripts/serverless-prod.yml` | **Source of truth (prod)** — same shape, prod values. Read when `--stage prod`. | **gitignored** |
+| `serverless.yml` (repo root)  | **Deployed config** — its `provider.environment` is rewritten to `${ssm:...}` references. Read by Serverless at deploy. | committed |
+
+The `--stage <stage>` flag (default `dev`) drives the defaults for both
+`--file` (`scripts/serverless-<stage>.yml`) and `--prefix`
+(`/drinkbuy/wss-lambda/<stage>`). Passing `--file`/`--prefix` explicitly still
+overrides the derivation.
 
 For each run the script:
 
@@ -154,23 +164,27 @@ aws sts get-caller-identity --profile drink-root   # confirm credentials
 ## Usage
 
 ```bash
-# Preview vs current SSM (read-only)
-./src/scripts/create-ssm-parameters.sh --dry-run --diff
+# Preview dev vs current SSM (read-only)
+./scripts/create-ssm-parameters.sh --dry-run --diff
 
-# Apply (writes changed/new SSM entries; rewrites root serverless.yml)
-./src/scripts/create-ssm-parameters.sh
+# Apply dev (writes changed/new SSM entries; rewrites root serverless.yml)
+./scripts/create-ssm-parameters.sh
 
-# Apply with a visible per-name diff
-./src/scripts/create-ssm-parameters.sh --diff
+# Apply dev with a visible per-name diff
+./scripts/create-ssm-parameters.sh --diff
 
-# Clean slate: backup + wipe + recreate from source
-./src/scripts/create-ssm-parameters.sh --reset
+# Same flow against prod — --stage derives file + prefix
+./scripts/create-ssm-parameters.sh --stage prod --dry-run --diff
+./scripts/create-ssm-parameters.sh --stage prod
 
-# Different file / prefix / region (e.g. a prod stage)
-./src/scripts/create-ssm-parameters.sh \
-  --file src/scripts/serverless.prod.yml \
-  --root serverless.yml \
-  --prefix /drinkbuy/wss-lambda/prod
+# Clean slate: backup + wipe + recreate from source (per stage)
+./scripts/create-ssm-parameters.sh --reset
+./scripts/create-ssm-parameters.sh --stage prod --reset
+
+# Manually override file / prefix (the --stage derivation is just the default)
+./scripts/create-ssm-parameters.sh \
+  --file scripts/serverless-staging.yml \
+  --prefix /drinkbuy/wss-lambda/staging
 ```
 
 If your credentials live behind a profile, prefix the command with
@@ -178,10 +192,10 @@ If your credentials live behind a profile, prefix the command with
 
 ## Day-to-day workflow
 
-1. Add/edit/remove a variable in **`src/scripts/serverless.yml`**
+1. Add/edit/remove a variable in **`scripts/serverless-<stage>.yml`**
    `provider.environment` (the gitignored source — put the real value there).
-2. `./src/scripts/create-ssm-parameters.sh --dry-run --diff` to preview.
-3. `./src/scripts/create-ssm-parameters.sh` to apply.
+2. `./scripts/create-ssm-parameters.sh [--stage prod] --dry-run --diff` to preview.
+3. `./scripts/create-ssm-parameters.sh [--stage prod]` to apply.
 4. `git diff serverless.yml` to review the regenerated `${ssm:...}` references.
 5. Commit the code + the updated root `serverless.yml`. The SSM write and the
    git push are independent — SSM values take effect on the **next deploy**.
@@ -206,9 +220,10 @@ delete + recreate).
 
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
-| `--file <path>` | `src/scripts/serverless.yml` | Source YAML read for `provider.environment` values. |
+| `--stage <stage>` | `dev` | Drives the defaults for `--file` (`scripts/serverless-<stage>.yml`) and `--prefix` (`/drinkbuy/wss-lambda/<stage>`). |
+| `--file <path>` | `scripts/serverless-<stage>.yml` | Source YAML read for `provider.environment` values. Overrides the stage-derived default. |
 | `--root <path>` | `serverless.yml` | Committed config whose `provider.environment` is rewritten. |
-| `--prefix <path>` | `/drinkbuy/wss-lambda/dev` | SSM prefix to write under. |
+| `--prefix <path>` | `/drinkbuy/wss-lambda/<stage>` | SSM prefix to write under. Overrides the stage-derived default. |
 | `--region <region>` | `us-east-1` | AWS region. |
 | `--dry-run` | off | Skip every AWS write and root-yaml edit; print only. |
 | `--diff` | off | Print which params are new/changed/same vs current SSM. |

@@ -38,24 +38,27 @@
 #   - empty value                     -> left untouched (e.g. DDB_LOCAL_ENDPOINT).
 #   - bare value with ${...}          -> left untouched (CONNECTIONS_TABLE, WEBSOCKET_STAGE).
 #
-# Source-of-truth file (--file, default src/scripts/serverless.yml) holds the
+# Source-of-truth file (--file, default scripts/serverless-<stage>.yml) holds the
 # decrypted values and is gitignored. The root file (--root, default
 # serverless.yml) is committed and only its `provider.environment` value lines
 # are rewritten — comments, blank lines and the rest of the file are preserved
 # byte-for-byte.
 #
 # Usage:
-#   ./src/scripts/create-ssm-parameters.sh \
-#     [--file src/scripts/serverless.yml] [--root serverless.yml] \
-#     [--prefix /drinkbuy/wss-lambda/dev] [--region us-east-1] \
+#   ./scripts/create-ssm-parameters.sh [--stage dev|prod] \
+#     [--file scripts/serverless-<stage>.yml] [--root serverless.yml] \
+#     [--prefix /drinkbuy/wss-lambda/<stage>] [--region us-east-1] \
 #     [--dry-run] [--diff] [--reset]
 #
 # Flags:
+#   --stage <stage>   Stage that drives the defaults for --file and --prefix
+#                     (default: dev). Pass `prod` to target the prod source +
+#                     prefix in one go.
 #   --file <path>     Source serverless.yml read for `provider.environment`
-#                     values (default: src/scripts/serverless.yml).
+#                     values (default: scripts/serverless-<stage>.yml).
 #   --root <path>     Committed serverless.yml whose `provider.environment` is
 #                     rewritten to ${ssm:...} references (default: serverless.yml).
-#   --prefix <path>   SSM prefix (default: /drinkbuy/wss-lambda/dev).
+#   --prefix <path>   SSM prefix (default: /drinkbuy/wss-lambda/<stage>).
 #   --region <region> AWS region (default: us-east-1).
 #   --dry-run         Skip every AWS write and root-yaml edit; print only.
 #   --diff            Show per-name diff vs current SSM state.
@@ -67,11 +70,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-YAML_FILE="$SCRIPT_DIR/serverless.yml"
-ROOT_YAML="$REPO_ROOT/serverless.yml"
-PREFIX="/drinkbuy/wss-lambda/dev"
+# Empty so we can tell apart "user passed --file/--prefix" from
+# "fall back to the stage-derived default" once arg parsing is done.
+STAGE="dev"
+YAML_FILE=""
+ROOT_YAML=""
+PREFIX=""
 REGION="us-east-1"
 DRY_RUN=false
 SHOW_DIFF=false
@@ -79,6 +85,7 @@ RESET=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --stage)    STAGE="$2"; shift 2 ;;
     --file)     YAML_FILE="$2"; shift 2 ;;
     --root)     ROOT_YAML="$2"; shift 2 ;;
     --prefix)   PREFIX="$2"; shift 2 ;;
@@ -94,6 +101,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Stage-derived defaults — explicit --file/--prefix/--root still win.
+[[ -z "$YAML_FILE" ]] && YAML_FILE="$SCRIPT_DIR/serverless-${STAGE}.yml"
+[[ -z "$ROOT_YAML" ]] && ROOT_YAML="$REPO_ROOT/serverless.yml"
+[[ -z "$PREFIX"    ]] && PREFIX="/drinkbuy/wss-lambda/${STAGE}"
+
 for bin in aws yq jq; do
   command -v "$bin" >/dev/null || {
     echo "Error: '$bin' not found in PATH." >&2; exit 1
@@ -102,8 +114,9 @@ done
 
 if [[ ! -f "$YAML_FILE" ]]; then
   echo "Error: source file '$YAML_FILE' not found." >&2
-  echo "Tip: this file is gitignored and holds the decrypted values. Create it" >&2
-  echo "     from the current serverless.yml before running." >&2
+  echo "Tip: this file is gitignored and holds the decrypted values for stage" >&2
+  echo "     '$STAGE'. Create it from the current serverless.yml before running" >&2
+  echo "     (or pass --file <path> / --stage <stage> to point elsewhere)." >&2
   exit 1
 fi
 
@@ -188,6 +201,7 @@ if [[ -z "$ACCOUNT_ID" || "$ACCOUNT_ID" == "None" ]]; then
   exit 1
 fi
 
+echo "Stage:        $STAGE"
 echo "Source file:  $YAML_FILE"
 echo "Root yaml:    $ROOT_YAML"
 echo "Prefix:       $PREFIX"

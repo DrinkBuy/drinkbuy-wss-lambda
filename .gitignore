@@ -64,5 +64,5 @@ Thumbs.db
 .cache/
 .tmp/
 .temp/
-/src/scripts/serverless-dev.yml
-/src/scripts/serverless-prod.yml
+/scripts/serverless-dev.yml
+/scripts/serverless-prod.yml
