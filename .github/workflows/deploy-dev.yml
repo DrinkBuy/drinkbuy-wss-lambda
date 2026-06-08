@@ -1,0 +1,49 @@
+name: Deploy Lambda (dev)
+
+# Deploys the WebSocket Lambda stack via Serverless Framework v3 (CloudFormation).
+# Unlike the ECS services, there is no Docker image / ECR here: the job installs
+# deps and runs `serverless deploy --stage dev`, which provisions Lambda + API
+# Gateway (websocket & httpApi) + DynamoDB + the EventBridge schedule.
+#
+# serverless is pinned to v3 (npx serverless@3) on purpose: v4 requires a license
+# key, while this project targets v3 (frameworkVersion ">=3").
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required for AWS OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  STAGE: dev
+  # IAM role trusting the GitHub OIDC provider (PowerUserAccess + scoped IAM)
+  AWS_ROLE_ARN: arn:aws:iam::390402542129:role/github-actions-serverless-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Serverless deploy
+        # SSM params (/drinkbuy/wss-lambda/dev/*) are resolved at deploy time.
+        run: npx serverless@3 deploy --stage ${{ env.STAGE }} --region ${{ env.AWS_REGION }}
