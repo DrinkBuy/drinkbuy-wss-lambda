@@ -1,0 +1,64 @@
+name: Deploy Lambda (prod)
+
+# PRODUCTION deploy of the WebSocket Lambda stack via Serverless Framework v3.
+# Runs MANUALLY ONLY (workflow_dispatch) — there is no push trigger, so prod is
+# never deployed automatically. Run it from the `main` branch, whose serverless.yml
+# resolves the SSM params under /drinkbuy/wss-lambda/prod/*.
+#
+# Reuses the same OIDC role as dev (github-actions-serverless-deploy); its trust
+# (repo:DrinkBuy/drinkbuy-wss-lambda:*) and IAM scope (drinkbuy-wss-lambda-commands-*)
+# already cover the prod stack.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm a PRODUCTION deploy'
+        required: true
+        default: ''
+
+permissions:
+  id-token: write   # required for AWS OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  STAGE: prod
+  AWS_ROLE_ARN: arn:aws:iam::390402542129:role/github-actions-serverless-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Optional approval gate: add required reviewers to the "production"
+    # environment in the repo settings to require a manual approval before this runs.
+    environment: production
+    steps:
+      - name: Validate confirmation
+        if: ${{ github.event.inputs.confirm != 'deploy' }}
+        run: |
+          echo "::error::Confirmation failed: type 'deploy' to run a production deploy."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        # --legacy-peer-deps: serverless-offline@14 declares a peer of serverless@^4,
+        # but this project targets serverless v3. serverless-offline is a local-dev
+        # only tool (not used by the deploy), so the peer mismatch is safe to ignore.
+        run: npm ci --legacy-peer-deps
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Serverless deploy (prod)
+        # SSM params (/drinkbuy/wss-lambda/prod/*) are resolved at deploy time.
+        run: npx serverless@3 deploy --stage ${{ env.STAGE }} --region ${{ env.AWS_REGION }}
