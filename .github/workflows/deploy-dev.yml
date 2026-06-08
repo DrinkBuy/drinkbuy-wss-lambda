@@ -36,7 +36,10 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        # --legacy-peer-deps: serverless-offline@14 declares a peer of serverless@^4,
+        # but this project targets serverless v3. serverless-offline is a local-dev
+        # only tool (not used by the deploy), so the peer mismatch is safe to ignore.
+        run: npm ci --legacy-peer-deps
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
