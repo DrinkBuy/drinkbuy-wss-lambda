@@ -2,8 +2,7 @@ import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { connectMongo } from "../db/mongo";
 import { publishCommandAndFanOut } from "../services/publisher-service";
 import { IUserCommandModel, UserCommandModel } from "../models/user-command";
-import { checkTable, scanTable } from "../infra/ddb";
-import { env } from "../env";
+import { UserModel } from "../models/user";
 import { TypeUserCommandScopeEnum } from "../types";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
@@ -64,17 +63,14 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
             return json(400, { ok: false, error: "user_id, scope and command are required" });
         }
 
-        // For test and dev env
-        await checkTable(env.CONNECTIONS_TABLE);
-        await scanTable(env.CONNECTIONS_TABLE);
         await connectMongo();
 
         if (body.user_id === "ALL") {
-            const users = await UserCommandModel.find().exec();
+            const users = await UserModel.find().select("_id username").lean().exec();
             await Promise.all(
                 users.map((user) =>
                     createAndPublish({
-                        user_id: String(user.user_id),
+                        user_id: String(user._id),
                         username: user.username,
                         scope: body.scope!,
                         command: body.command!,
