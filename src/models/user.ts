@@ -20,4 +20,5 @@ const userSchema = new Schema<IUser>({
     },
 }, { strict: false }); // keep flexible to match existing schema
 
-export const UserModel = mongoose.models.User || mongoose.model<IUser>('User', userSchema);
+export const UserModel: mongoose.Model<IUser> =
+    mongoose.models.User || mongoose.model<IUser>('User', userSchema);

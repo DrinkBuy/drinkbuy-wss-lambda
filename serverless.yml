@@ -53,7 +53,7 @@ provider:
 functions:
   websocket:
     handler: src/handlers/websocket.handler
-    timeout: 30
+    timeout: 45
     memorySize: 512
     events:
       - websocket: { route: $connect }
