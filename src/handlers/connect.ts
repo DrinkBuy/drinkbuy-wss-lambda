@@ -6,6 +6,9 @@ import {DynamoConnectionRepository} from "../repositories/connections-repository
 import {checkTable} from "../infra/ddb";
 import {sessionIsCurrent, sessionStartOf} from "../services/session-service";
 
+// API Gateway closes every WebSocket connection after two hours
+const CONNECTION_MAX_SECONDS = 2 * 60 * 60;
+
 // $connect is the one route whose event carries the query string
 export type ConnectEvent = APIGatewayProxyWebsocketEventV2 & {
     queryStringParameters?: APIGatewayProxyEventQueryStringParameters;
@@ -42,8 +45,16 @@ export const handler = async (event: ConnectEvent) => {
             };
         }
 
-        // Map connection to user
-        await DynamoConnectionRepository.put(userId, connectionId);
+        // The owner is taken from the verified token, and it lasts no longer than the token does
+        const nowSecs = Math.floor(Date.now() / 1000);
+        await DynamoConnectionRepository.put(
+            {
+                userId,
+                authTime,
+                expiresAt: Math.min(nowSecs + CONNECTION_MAX_SECONDS, payload.exp ?? Infinity),
+            },
+            connectionId
+        );
 
         console.log("[Connect].handler(): payload and connection id", userId, connectionId);
 

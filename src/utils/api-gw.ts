@@ -1,5 +1,6 @@
 import {
     ApiGatewayManagementApiClient,
+    DeleteConnectionCommand,
     PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
 import { PostToConnectionStatus } from "../types";
@@ -55,5 +56,18 @@ export async function postToConnection(
         }
 
         return PostToConnectionStatus.ERROR;
+    }
+}
+
+export async function closeConnection(
+    client: ApiGatewayManagementApiClient,
+    connectionId: string): Promise<void> {
+
+    try {
+        await client.send(new DeleteConnectionCommand({ ConnectionId: connectionId }));
+    } catch (err) {
+        // Logged, not thrown: callers remove the connection's items before closing it, so a
+        // connection that stays open (or is already gone) no longer receives pushes either way
+        console.error("[ApiGW].closeConnection(): error", err);
     }
 }
