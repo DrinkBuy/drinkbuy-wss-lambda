@@ -44,11 +44,12 @@ const PUSH_KEY = { pk: `USER#${OWNER_ID}`, sk: `CONN#${CONNECTION_ID}` };
 
 // The clock stands still in every test, so expiry times compare exactly
 const NOW = 1767225600;
-const nowSecs = () => Math.floor(Date.now() / 1000);
 
 let ownerItem: Record<string, unknown> | undefined;
 let account: { status?: string; sessions_valid_after?: Date };
 let commands: StoredCommand[];
+
+const liveOwner = () => ({ ...OWNER_KEY, userId: OWNER_ID, authTime: NOW - 30, ttl: NOW + 600 });
 
 function wsEvent(
     routeKey: string,
@@ -81,7 +82,7 @@ const connect = (token: string) => handler(wsEvent("$connect", "CONNECT", { toke
 const disconnect = () => handler(wsEvent("$disconnect", "DISCONNECT"));
 
 function signToken(claims: object) {
-    return jwt.sign({ _id: OWNER_ID, username: "owner", exp: nowSecs() + 3600, ...claims }, "test-secret");
+    return jwt.sign({ _id: OWNER_ID, username: "owner", exp: NOW + 3600, ...claims }, "test-secret");
 }
 
 function sent<T>(type: new (...args: never[]) => T): T[] {
@@ -119,7 +120,7 @@ describe("$connect", () => {
     it("refuses an account that is no longer active", async () => {
         account = { status: "inactive" };
 
-        const response = await connect(signToken({ auth_time: nowSecs() }));
+        const response = await connect(signToken({ auth_time: NOW }));
 
         expect(response).toMatchObject({ statusCode: 401 });
         expect(putItems()).toEqual([]);
@@ -131,7 +132,7 @@ describe("$connect", () => {
     ])("refuses an account that %s", async (_, state) => {
         account = state;
 
-        const response = await connect(signToken({ auth_time: nowSecs() }));
+        const response = await connect(signToken({ auth_time: NOW }));
 
         expect(response).toMatchObject({ statusCode: 401 });
         expect(putItems()).toEqual([]);
@@ -148,7 +149,7 @@ describe("$connect", () => {
     });
 
     it("counts a token without auth_time from its iat", async () => {
-        const cutoff = nowSecs() - 60;
+        const cutoff = NOW - 60;
         account = { status: "active", sessions_valid_after: new Date(cutoff * 1000) };
 
         expect(await connect(signToken({ iat: cutoff - 1 }))).toMatchObject({ statusCode: 401 });
@@ -165,7 +166,7 @@ describe("$connect", () => {
 
     it("writes the user's connection and its owner for a current session", async () => {
         account = { status: "active", sessions_valid_after: new Date(Date.now() - 60_000) };
-        const authTime = nowSecs();
+        const authTime = NOW;
         const exp = authTime + 3600;
 
         const response = await connect(signToken({ auth_time: authTime, exp }));
@@ -202,7 +203,6 @@ describe("$connect", () => {
 describe.each(["action", "type"])("a ping sent as {%s: \"ping\"}", (field) => {
     const ping = (userId: string) =>
         handler(wsEvent("$default", "MESSAGE", { body: JSON.stringify({ [field]: "ping", userId }) }));
-    const liveOwner = () => ({ ...OWNER_KEY, userId: OWNER_ID, authTime: nowSecs() - 30, ttl: nowSecs() + 600 });
 
     it("renews only the connection's owner, whatever user id the message names", async () => {
         ownerItem = liveOwner();
@@ -231,7 +231,7 @@ describe.each(["action", "type"])("a ping sent as {%s: \"ping\"}", (field) => {
     });
 
     it("renews nobody once the owner has expired, even though DynamoDB has not removed it yet", async () => {
-        ownerItem = { ...liveOwner(), ttl: nowSecs() - 1 };
+        ownerItem = { ...liveOwner(), ttl: NOW - 1 };
 
         await ping(OWNER_ID);
 
@@ -261,7 +261,6 @@ describe("user-commands-ack", () => {
                 body: JSON.stringify({ action: "user-commands-ack", commandIds }),
             })
         );
-    const liveOwner = () => ({ ...OWNER_KEY, userId: OWNER_ID, authTime: NOW - 30, ttl: NOW + 600 });
 
     beforeEach(() => {
         commands = [
@@ -352,7 +351,7 @@ describe("publishToUser", () => {
 
 describe("$disconnect", () => {
     it("removes the user's connection and its owner", async () => {
-        ownerItem = { ...OWNER_KEY, userId: OWNER_ID, authTime: nowSecs(), ttl: nowSecs() + 600 };
+        ownerItem = liveOwner();
 
         await disconnect();
 

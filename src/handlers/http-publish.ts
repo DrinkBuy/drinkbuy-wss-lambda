@@ -38,9 +38,9 @@ function bearerToken(authorization: string | undefined): string | null {
     return match ? match[1] : null;
 }
 
-function verifiedSigner(token: string, ignoreExpiration: boolean): Signer | null {
+function verifiedSigner(token: string, options: { ignoreExpiration: boolean }): Signer | null {
     try {
-        const claims = jwt.verify(token, env.JWT_SECRET, { ignoreExpiration });
+        const claims = jwt.verify(token, env.JWT_SECRET, options);
         if (typeof claims === "string" || typeof claims._id !== "string") {
             return null;
         }
@@ -95,8 +95,10 @@ async function refusal(token: string, signer: Signer, request: PublishRequest): 
     if (isOwnOrderRefresh(signer, request)) {
         return null;
     }
-    // Anything else is the old panel's admin screen, which needs a live admin session
-    if (!verifiedSigner(token, false) || !(await sessionIsCurrent(signer.userId, signer.authTime))) {
+    // Anything else needs a live admin session, which the admin screens of both panels send.
+    // The signature was checked with expiry ignored; here an expired token is refused.
+    const unexpired = verifiedSigner(token, { ignoreExpiration: false }) !== null;
+    if (!unexpired || !(await sessionIsCurrent(signer.userId, signer.authTime))) {
         return unauthorized();
     }
     const account = await UserModel.findById(signer.userId).select("role").lean();
@@ -128,7 +130,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     try {
         // Authentication comes before the body is read; the token itself is never logged
         const token = bearerToken(event.headers.authorization);
-        const signer = token ? verifiedSigner(token, true) : null;
+        const signer = token ? verifiedSigner(token, { ignoreExpiration: true }) : null;
         if (!token || !signer) {
             return unauthorized();
         }
