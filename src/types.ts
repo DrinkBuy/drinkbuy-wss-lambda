@@ -1,6 +1,8 @@
 // noinspection SpellCheckingInspection
 
-export type JwtPayload = { _id: string; username: string };
+// auth_time is when the session signed in, in epoch seconds that may carry a fraction; tokens
+// signed before the API added it only have iat
+export type JwtPayload = { _id: string; username: string; iat?: number; exp?: number; auth_time?: number };
 
 export enum TypeUserStatusEnum {
     ACTIVE = "active",
