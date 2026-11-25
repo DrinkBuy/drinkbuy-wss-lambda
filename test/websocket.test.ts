@@ -8,6 +8,7 @@ import { closeConnection, postToConnection } from "../src/utils/api-gw";
 
 const mockSend = jest.fn<Promise<unknown>, [unknown]>();
 const mockFindUser = jest.fn<Promise<unknown>, [string]>();
+const mockUpdateCommands = jest.fn<Promise<unknown>, [CommandFilter, unknown]>();
 
 jest.mock("../src/env", () => ({ env: { JWT_SECRET: "test-secret", CONNECTIONS_TABLE: "connections" } }));
 jest.mock("../src/infra/ddb", () => ({
@@ -16,6 +17,9 @@ jest.mock("../src/infra/ddb", () => ({
 }));
 jest.mock("../src/db/mongo", () => ({ connectMongo: jest.fn() }));
 jest.mock("../src/models/user", () => ({ UserModel: { findById: mockUserQuery } }));
+jest.mock("../src/models/user-command", () => ({
+    UserCommandModel: { updateMany: (filter: CommandFilter, update: unknown) => mockUpdateCommands(filter, update) },
+}));
 jest.mock("../src/utils/api-gw", () => ({
     makeManagementClient: jest.fn(),
     postToConnection: jest.fn(),
@@ -23,6 +27,8 @@ jest.mock("../src/utils/api-gw", () => ({
 }));
 
 type UserQuery = { select: () => UserQuery; lean: () => Promise<unknown> };
+type CommandFilter = { _id: { $in: unknown[] }; user_id?: string };
+type StoredCommand = { _id: string; user_id: string; executed: boolean };
 
 function mockUserQuery(id: string): UserQuery {
     return { select: () => mockUserQuery(id), lean: () => mockFindUser(id) };
@@ -40,6 +46,7 @@ const nowSecs = () => Math.floor(Date.now() / 1000);
 
 let ownerItem: Record<string, unknown> | undefined;
 let account: { status: string; sessions_valid_after?: Date };
+let commands: StoredCommand[];
 
 function wsEvent(
     routeKey: string,
@@ -89,6 +96,17 @@ beforeEach(() => {
     account = { status: "active" };
     mockSend.mockImplementation(async (command) => (command instanceof GetCommand ? { Item: ownerItem } : {}));
     mockFindUser.mockImplementation(async (id) => (id === OWNER_ID ? account : null));
+    commands = [];
+    // Marks what Mongo would: the listed ids, and of those only the filter's user's when it names one
+    mockUpdateCommands.mockImplementation(async (filter) => {
+        for (const command of commands) {
+            const listed = filter._id.$in.includes(command._id);
+            if (listed && (filter.user_id === undefined || filter.user_id === command.user_id)) {
+                command.executed = true;
+            }
+        }
+        return {};
+    });
 });
 
 afterEach(() => {
@@ -209,6 +227,64 @@ describe.each(["action", "type"])("a ping sent as {%s: \"ping\"}", (field) => {
         expect(putItems()).toEqual([]);
         expect(deletedKeys()).toEqual(expect.arrayContaining([PUSH_KEY, OWNER_KEY]));
         expect(closeConnection).toHaveBeenCalledWith(undefined, CONNECTION_ID);
+    });
+});
+
+describe("user-commands-ack", () => {
+    const OWN_COMMAND = "65c000000000000000000001";
+    const OTHERS_COMMAND = "65c000000000000000000002";
+    const ack = (commandIds: unknown[]) =>
+        handler(
+            wsEvent("user-commands-ack", "MESSAGE", {
+                body: JSON.stringify({ action: "user-commands-ack", commandIds }),
+            })
+        );
+    const liveOwner = () => ({ ...OWNER_KEY, userId: OWNER_ID, authTime: NOW - 30, ttl: NOW + 600 });
+
+    beforeEach(() => {
+        commands = [
+            { _id: OWN_COMMAND, user_id: OWNER_ID, executed: false },
+            { _id: OTHERS_COMMAND, user_id: OTHER_ID, executed: false },
+        ];
+    });
+
+    it("marks the owner's command executed and leaves another user's command alone", async () => {
+        ownerItem = liveOwner();
+
+        await ack([OWN_COMMAND, OTHERS_COMMAND]);
+
+        expect(commands.map(({ executed }) => executed)).toEqual([true, false]);
+    });
+
+    it("writes nothing for a connection with no owner, and closes it", async () => {
+        await ack([OWN_COMMAND]);
+
+        expect(mockUpdateCommands).not.toHaveBeenCalled();
+        expect(closeConnection).toHaveBeenCalledWith(undefined, CONNECTION_ID);
+    });
+
+    it("writes nothing once a later password change has ended the session", async () => {
+        const cutoff = new Date((NOW - 10) * 1000);
+        ownerItem = { ...liveOwner(), authTime: NOW - 11 };
+        account = { status: "active", sessions_valid_after: cutoff };
+
+        await ack([OWN_COMMAND]);
+
+        expect(mockUpdateCommands).not.toHaveBeenCalled();
+        expect(deletedKeys()).toEqual(expect.arrayContaining([PUSH_KEY, OWNER_KEY]));
+        expect(closeConnection).toHaveBeenCalledWith(undefined, CONNECTION_ID);
+    });
+
+    it("takes only command ids, and at most a hundred of them", async () => {
+        ownerItem = liveOwner();
+        const many = Array.from({ length: 150 }, (_, i) => `65c${String(i).padStart(21, "0")}`);
+
+        await ack([{ $ne: null }, "not-an-id", ...many]);
+
+        expect(mockUpdateCommands).toHaveBeenCalledWith(
+            { _id: { $in: many.slice(0, 100) }, user_id: OWNER_ID },
+            expect.anything()
+        );
     });
 });
 
