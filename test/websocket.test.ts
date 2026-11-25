@@ -324,6 +324,22 @@ describe("listByUser", () => {
     });
 });
 
+describe("listByUser across pages", () => {
+    it("reads on until DynamoDB has no page left, since each 1 MB page is filtered after it is read", async () => {
+        const startKey = { pk: `USER#${OWNER_ID}`, sk: "CONN#expired-backlog" };
+        // The first page holds only expired items, so the filter leaves it empty
+        mockSend.mockImplementation(async (command) => {
+            if (!(command instanceof QueryCommand)) return {};
+            return command.input.ExclusiveStartKey
+                ? { Items: [{ connectionId: CONNECTION_ID }] }
+                : { Items: [], LastEvaluatedKey: startKey };
+        });
+
+        expect(await DynamoConnectionRepository.listByUser(OWNER_ID)).toEqual([CONNECTION_ID]);
+        expect(sent(QueryCommand).map(({ input }) => input.ExclusiveStartKey)).toEqual([undefined, startKey]);
+    });
+});
+
 describe("publishToUser", () => {
     beforeEach(() => {
         mockSend.mockImplementation(async (command) =>

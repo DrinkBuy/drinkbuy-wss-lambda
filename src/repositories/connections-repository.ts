@@ -1,4 +1,4 @@
-import { PutCommand, DeleteCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, DeleteCommand, GetCommand, QueryCommand, QueryCommandInput } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../infra/ddb";
 import { env } from "../env";
 
@@ -115,18 +115,30 @@ export const DynamoConnectionRepository = {
     },
 
     async listByUser(userId: string): Promise<string[]> {
-        const out = await docClient.send(new QueryCommand({
-            TableName: env.CONNECTIONS_TABLE,
-            KeyConditionExpression: "pk = :pk",
-            // DynamoDB deletes an expired item days late at worst; a connection that stopped
-            // pinging stops receiving pushes when its ttl passes. ttl is a reserved word.
-            FilterExpression: "#ttl > :now",
-            ExpressionAttributeNames: { "#ttl": "ttl" },
-            ExpressionAttributeValues: { ":pk": `USER#${userId}`, ":now": nowSecs() },
-            ProjectionExpression: "connectionId",
-        }));
-        return (out.Items ?? [])
-            .map((item) => item.connectionId)
-            .filter((connectionId): connectionId is string => typeof connectionId === "string");
+        const now = nowSecs();
+        const connectionIds: string[] = [];
+        let startKey: QueryCommandInput["ExclusiveStartKey"];
+        // A page holds 1 MB read before the filter, so a backlog of expired items can fill the
+        // first one and hide a live connection behind it
+        do {
+            const page = await docClient.send(new QueryCommand({
+                TableName: env.CONNECTIONS_TABLE,
+                KeyConditionExpression: "pk = :pk",
+                // DynamoDB deletes an expired item days late at worst; a connection that stopped
+                // pinging stops receiving pushes when its ttl passes. ttl is a reserved word.
+                FilterExpression: "#ttl > :now",
+                ExpressionAttributeNames: { "#ttl": "ttl" },
+                ExpressionAttributeValues: { ":pk": `USER#${userId}`, ":now": now },
+                ProjectionExpression: "connectionId",
+                ExclusiveStartKey: startKey,
+            }));
+            for (const item of page.Items ?? []) {
+                if (typeof item.connectionId === "string") {
+                    connectionIds.push(item.connectionId);
+                }
+            }
+            startKey = page.LastEvaluatedKey;
+        } while (startKey);
+        return connectionIds;
     },
 };
