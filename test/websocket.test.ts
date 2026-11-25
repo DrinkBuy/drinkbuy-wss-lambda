@@ -3,7 +3,9 @@ import { DeleteCommand, GetCommand, PutCommand, QueryCommand } from "@aws-sdk/li
 import type { ConnectEvent } from "../src/handlers/connect";
 import { handler } from "../src/handlers/websocket";
 import { DynamoConnectionRepository } from "../src/repositories/connections-repository";
+import { publishToUser } from "../src/services/publisher-service";
 import { passwordChangedSince } from "../src/services/session-service";
+import { PostToConnectionStatus } from "../src/types";
 import { closeConnection, postToConnection } from "../src/utils/api-gw";
 
 const mockSend = jest.fn<Promise<unknown>, [unknown]>();
@@ -45,7 +47,7 @@ const NOW = 1767225600;
 const nowSecs = () => Math.floor(Date.now() / 1000);
 
 let ownerItem: Record<string, unknown> | undefined;
-let account: { status: string; sessions_valid_after?: Date };
+let account: { status?: string; sessions_valid_after?: Date };
 let commands: StoredCommand[];
 
 function wsEvent(
@@ -123,6 +125,18 @@ describe("$connect", () => {
         expect(putItems()).toEqual([]);
     });
 
+    it.each([
+        ["is banned", { status: "banned" }],
+        ["has no status", {}],
+    ])("refuses an account that %s", async (_, state) => {
+        account = state;
+
+        const response = await connect(signToken({ auth_time: nowSecs() }));
+
+        expect(response).toMatchObject({ statusCode: 401 });
+        expect(putItems()).toEqual([]);
+    });
+
     it("refuses a token whose session signed in before the last password change", async () => {
         const cutoff = new Date(Date.now() - 60_000);
         account = { status: "active", sessions_valid_after: cutoff };
@@ -139,6 +153,14 @@ describe("$connect", () => {
 
         expect(await connect(signToken({ iat: cutoff - 1 }))).toMatchObject({ statusCode: 401 });
         expect(await connect(signToken({ iat: cutoff + 1 }))).toMatchObject({ statusCode: 200 });
+    });
+
+    it("does not fall back to iat when auth_time is there but is not a number", async () => {
+        account = { status: "active", sessions_valid_after: new Date((NOW - 60) * 1000) };
+
+        const response = await connect(signToken({ auth_time: String(NOW), iat: NOW }));
+
+        expect(response).toMatchObject({ statusCode: 401 });
     });
 
     it("writes the user's connection and its owner for a current session", async () => {
@@ -303,6 +325,31 @@ describe("listByUser", () => {
     });
 });
 
+describe("publishToUser", () => {
+    beforeEach(() => {
+        mockSend.mockImplementation(async (command) =>
+            command instanceof QueryCommand ? { Items: [{ connectionId: CONNECTION_ID }] } : {}
+        );
+    });
+
+    it("deletes both of a connection's items when API Gateway answers that it is gone", async () => {
+        jest.mocked(postToConnection).mockResolvedValue(PostToConnectionStatus.GONE);
+
+        await publishToUser(OWNER_ID, { type: "user-command" });
+
+        expect(deletedKeys()).toHaveLength(2);
+        expect(deletedKeys()).toEqual(expect.arrayContaining([PUSH_KEY, OWNER_KEY]));
+    });
+
+    it("keeps a connection that took the push", async () => {
+        jest.mocked(postToConnection).mockResolvedValue(PostToConnectionStatus.OK);
+
+        await publishToUser(OWNER_ID, { type: "user-command" });
+
+        expect(deletedKeys()).toEqual([]);
+    });
+});
+
 describe("$disconnect", () => {
     it("removes the user's connection and its owner", async () => {
         ownerItem = { ...OWNER_KEY, userId: OWNER_ID, authTime: nowSecs(), ttl: nowSecs() + 600 };
@@ -320,6 +367,13 @@ describe("passwordChangedSince", () => {
     it("compares the token's sign-in time with the cut-off to the millisecond", () => {
         expect(passwordChangedSince(account, 1767225600.499)).toBe(true);
         expect(passwordChangedSince(account, 1767225600.5)).toBe(false);
+    });
+
+    it("rounds the sign-in time to its nearest millisecond, as the API does", () => {
+        const cutoffMs = account.sessions_valid_after.getTime();
+
+        expect(passwordChangedSince(account, (cutoffMs - 0.4) / 1000)).toBe(false);
+        expect(passwordChangedSince(account, (cutoffMs - 0.6) / 1000)).toBe(true);
     });
 
     it("ends a session with no known sign-in time only when there is a cut-off", () => {
