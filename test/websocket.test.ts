@@ -1,7 +1,8 @@
 import jwt from "jsonwebtoken";
-import { DeleteCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { ConnectEvent } from "../src/handlers/connect";
 import { handler } from "../src/handlers/websocket";
+import { DynamoConnectionRepository } from "../src/repositories/connections-repository";
 import { passwordChangedSince } from "../src/services/session-service";
 import { closeConnection, postToConnection } from "../src/utils/api-gw";
 
@@ -33,6 +34,8 @@ const OTHER_ID = "64b000000000000000000002";
 const OWNER_KEY = { pk: `CONN#${CONNECTION_ID}`, sk: "OWNER" };
 const PUSH_KEY = { pk: `USER#${OWNER_ID}`, sk: `CONN#${CONNECTION_ID}` };
 
+// The clock stands still in every test, so expiry times compare exactly
+const NOW = 1767225600;
 const nowSecs = () => Math.floor(Date.now() / 1000);
 
 let ownerItem: Record<string, unknown> | undefined;
@@ -81,10 +84,15 @@ const deletedKeys = () => sent(DeleteCommand).map(({ input }) => input.Key);
 
 beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(Date, "now").mockReturnValue(NOW * 1000);
     ownerItem = undefined;
     account = { status: "active" };
     mockSend.mockImplementation(async (command) => (command instanceof GetCommand ? { Item: ownerItem } : {}));
     mockFindUser.mockImplementation(async (id) => (id === OWNER_ID ? account : null));
+});
+
+afterEach(() => {
+    jest.restoreAllMocks();
 });
 
 describe("$connect", () => {
@@ -131,6 +139,23 @@ describe("$connect", () => {
             ])
         );
     });
+
+    it("keeps the user's item for a minute, and the owner until the token expires but two hours at most", async () => {
+        await connect(signToken({ auth_time: NOW, exp: NOW + 10 * 60 * 60 }));
+
+        expect(putItems()).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ ...PUSH_KEY, ttl: NOW + 60 }),
+                expect.objectContaining({ ...OWNER_KEY, ttl: NOW + 2 * 60 * 60 }),
+            ])
+        );
+    });
+
+    it("lets neither item outlive a token that expires within the minute", async () => {
+        await connect(signToken({ auth_time: NOW, exp: NOW + 30 }));
+
+        expect(putItems().map((item) => item?.ttl)).toEqual([NOW + 30, NOW + 30]);
+    });
 });
 
 // Both panels' heartbeat sends {type: "ping"}; {action: "ping"} is the shape API Gateway routes on
@@ -147,6 +172,15 @@ describe.each(["action", "type"])("a ping sent as {%s: \"ping\"}", (field) => {
         expect(putItems()).toEqual([expect.objectContaining({ ...PUSH_KEY, userId: OWNER_ID })]);
         expect(postToConnection).toHaveBeenCalledWith(undefined, CONNECTION_ID, expect.objectContaining({ type: "pong" }));
         expect(closeConnection).not.toHaveBeenCalled();
+    });
+
+    it("keeps the user's item a minute past the ping, and never past the owner's expiry", async () => {
+        ownerItem = { ...liveOwner(), ttl: NOW + 600 };
+        await ping(OWNER_ID);
+        ownerItem = { ...liveOwner(), ttl: NOW + 30 };
+        await ping(OWNER_ID);
+
+        expect(putItems().map((item) => item?.ttl)).toEqual([NOW + 60, NOW + 30]);
     });
 
     it("renews nobody for a connection with no owner, and closes it", async () => {
@@ -175,6 +209,21 @@ describe.each(["action", "type"])("a ping sent as {%s: \"ping\"}", (field) => {
         expect(putItems()).toEqual([]);
         expect(deletedKeys()).toEqual(expect.arrayContaining([PUSH_KEY, OWNER_KEY]));
         expect(closeConnection).toHaveBeenCalledWith(undefined, CONNECTION_ID);
+    });
+});
+
+describe("listByUser", () => {
+    it("asks only for connections whose ttl has not passed, as DynamoDB deletes expired items days late", async () => {
+        await DynamoConnectionRepository.listByUser(OWNER_ID);
+
+        expect(sent(QueryCommand).map(({ input }) => input)).toEqual([
+            expect.objectContaining({
+                KeyConditionExpression: "pk = :pk",
+                FilterExpression: "#ttl > :now",
+                ExpressionAttributeNames: { "#ttl": "ttl" },
+                ExpressionAttributeValues: { ":pk": `USER#${OWNER_ID}`, ":now": NOW },
+            }),
+        ]);
     });
 });
 

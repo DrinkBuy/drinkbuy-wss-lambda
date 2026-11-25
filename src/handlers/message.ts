@@ -56,7 +56,7 @@ export const handler = async (event: APIGatewayProxyWebsocketEventV2) => {
             };
         }
 
-        await DynamoConnectionRepository.renew(owner.userId, connectionId);
+        await DynamoConnectionRepository.renew(owner, connectionId);
 
         await postToConnection(client, connectionId, {
             type: "pong",
