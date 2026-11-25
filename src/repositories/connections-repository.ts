@@ -2,7 +2,10 @@ import { PutCommand, DeleteCommand, GetCommand, QueryCommand } from "@aws-sdk/li
 import { docClient } from "../infra/ddb";
 import { env } from "../env";
 
-const TTL_SECONDS = 60;
+// The panels ping every 30 s, but Chrome runs the timers of a tab hidden for 5 minutes once a
+// minute at most. A minute's ttl lapsed just as that ping landed, and a push in the gap was
+// filtered out; 150 s outlasts two throttled pings.
+const TTL_SECONDS = 150;
 
 /** Who a connection belongs to, as the token verified on $connect says. */
 export type ConnectionOwner = {
@@ -18,7 +21,7 @@ const nowSecs = () => Math.floor(Date.now() / 1000);
 const ownerKey = (connectionId: string) => ({ pk: `CONN#${connectionId}`, sk: "OWNER" });
 const pushKey = (userId: string, connectionId: string) => ({ pk: `USER#${userId}`, sk: `CONN#${connectionId}` });
 
-/** The item publishToUser lists: it lasts a minute past the last ping, and never past its owner. */
+/** The item publishToUser lists: it lasts TTL_SECONDS past the last ping, and never past its owner. */
 function pushItem(owner: ConnectionOwner, connectionId: string) {
     return {
         ...pushKey(owner.userId, connectionId),

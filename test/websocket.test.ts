@@ -181,18 +181,18 @@ describe("$connect", () => {
         );
     });
 
-    it("keeps the user's item for a minute, and the owner until the token expires but two hours at most", async () => {
+    it("keeps the user's item for 150 seconds, and the owner until the token expires but two hours at most", async () => {
         await connect(signToken({ auth_time: NOW, exp: NOW + 10 * 60 * 60 }));
 
         expect(putItems()).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ ...PUSH_KEY, ttl: NOW + 60 }),
+                expect.objectContaining({ ...PUSH_KEY, ttl: NOW + 150 }),
                 expect.objectContaining({ ...OWNER_KEY, ttl: NOW + 2 * 60 * 60 }),
             ])
         );
     });
 
-    it("lets neither item outlive a token that expires within the minute", async () => {
+    it("lets neither item outlive a token that expires sooner", async () => {
         await connect(signToken({ auth_time: NOW, exp: NOW + 30 }));
 
         expect(putItems().map((item) => item?.ttl)).toEqual([NOW + 30, NOW + 30]);
@@ -214,13 +214,13 @@ describe.each(["action", "type"])("a ping sent as {%s: \"ping\"}", (field) => {
         expect(closeConnection).not.toHaveBeenCalled();
     });
 
-    it("keeps the user's item a minute past the ping, and never past the owner's expiry", async () => {
+    it("keeps the user's item 150 seconds past the ping, and never past the owner's expiry", async () => {
         ownerItem = { ...liveOwner(), ttl: NOW + 600 };
         await ping(OWNER_ID);
         ownerItem = { ...liveOwner(), ttl: NOW + 30 };
         await ping(OWNER_ID);
 
-        expect(putItems().map((item) => item?.ttl)).toEqual([NOW + 60, NOW + 30]);
+        expect(putItems().map((item) => item?.ttl)).toEqual([NOW + 150, NOW + 30]);
     });
 
     it("renews nobody for a connection with no owner, and closes it", async () => {
