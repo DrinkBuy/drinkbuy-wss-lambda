@@ -5,6 +5,8 @@ export interface IUser {
     bar_id?: mongoose.Types.ObjectId;
     username: string;
     role: string;
+    status?: string;
+    sessions_valid_after?: Date | null;
 }
 
 const userSchema = new Schema<IUser>({
@@ -18,6 +20,9 @@ const userSchema = new Schema<IUser>({
         type: String,
         required: true
     },
+    status: { type: String },
+    // Set by the API on each new password: every session that signed in before it is over
+    sessions_valid_after: { type: Date },
 }, { strict: false }); // keep flexible to match existing schema
 
 export const UserModel: mongoose.Model<IUser> =

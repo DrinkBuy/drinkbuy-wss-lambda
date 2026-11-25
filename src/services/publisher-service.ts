@@ -3,7 +3,7 @@ import { UserCommandOut, PostToConnectionStatus } from "../types";
 import { makeManagementClient, postToConnection } from "../utils/api-gw";
 import { DynamoConnectionRepository } from "../repositories/connections-repository";
 
-export async function publishToUser(userId: string, event: any) {
+export async function publishToUser(userId: string, event: unknown) {
     console.log(`[PublishService].publishToUser(): env.WEBSOCKET_DOMAIN ${env.WEBSOCKET_DOMAIN}`);
     console.log(`[PublishService].publishToUser(): env.WEBSOCKET_STAGE ${env.WEBSOCKET_STAGE}`);
     console.log(`[PublishService].publishToUser(): env.API_GW_WS_ENDPOINT ${env.API_GW_WS_ENDPOINT || "empty"}`);
@@ -14,7 +14,7 @@ export async function publishToUser(userId: string, event: any) {
         env.WEBSOCKET_API_ENDPOINT?.replace("wss://", "https://")
     );
 
-    let connections = await DynamoConnectionRepository.listByUser(userId);
+    const connections = await DynamoConnectionRepository.listByUser(userId);
 
     console.log(`[PublishService].publishToUser(): found ${connections.length} connections for user ${userId}`);
 
