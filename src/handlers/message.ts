@@ -28,7 +28,9 @@ export const handler = async (event: APIGatewayProxyWebsocketEventV2) => {
 
     console.log("[Message].handler(): request context", requestContext.domainName, requestContext.stage);
 
-    if (msg?.action === "ping") {
+    // Both panels' heartbeat sends {type: "ping"}, which API Gateway routes to $default; without
+    // a pong they drop the socket and reconnect
+    if (msg?.action === "ping" || msg?.type === "ping") {
         const client = makeManagementClient(
             requestContext.domainName,
             requestContext.stage

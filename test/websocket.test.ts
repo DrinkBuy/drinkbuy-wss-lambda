@@ -66,8 +66,6 @@ function wsEvent(
 }
 
 const connect = (token: string) => handler(wsEvent("$connect", "CONNECT", { token }));
-const ping = (userId: string) =>
-    handler(wsEvent("$default", "MESSAGE", { body: JSON.stringify({ action: "ping", userId }) }));
 const disconnect = () => handler(wsEvent("$disconnect", "DISCONNECT"));
 
 function signToken(claims: object) {
@@ -135,7 +133,10 @@ describe("$connect", () => {
     });
 });
 
-describe("ping", () => {
+// Both panels' heartbeat sends {type: "ping"}; {action: "ping"} is the shape API Gateway routes on
+describe.each(["action", "type"])("a ping sent as {%s: \"ping\"}", (field) => {
+    const ping = (userId: string) =>
+        handler(wsEvent("$default", "MESSAGE", { body: JSON.stringify({ [field]: "ping", userId }) }));
     const liveOwner = () => ({ ...OWNER_KEY, userId: OWNER_ID, authTime: nowSecs() - 30, ttl: nowSecs() + 600 });
 
     it("renews only the connection's owner, whatever user id the message names", async () => {
